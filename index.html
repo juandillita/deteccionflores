@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#28a745">
+    <title>Detector de Flores</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            touch-action: manipulation;
+        }
+
+        .video-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #video {
+            max-width: 100%;
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            border: 2px solid #dee2e6;
+            object-fit: cover;
+        }
+
+        #canvas {
+            display: none;
+        }
+
+        .prediction-display {
+            position: relative;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .live-prediction {
+            display: inline-block;
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 20px;
+            font-size: 1.4rem;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 3px 12px rgba(40, 167, 69, 0.3);
+            margin-bottom: 8px;
+            min-width: 180px;
+            opacity: 0;
+            transform: scale(0.9);
+            transition: all 0.3s ease;
+        }
+
+        .live-prediction.show {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .live-confidence {
+            display: inline-block;
+            background: rgba(108, 117, 125, 0.1);
+            color: #495057;
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            text-align: center;
+            border: 1px solid rgba(108, 117, 125, 0.2);
+        }
+
+        .flower-prediction {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            box-shadow: 0 3px 12px rgba(40, 167, 69, 0.3);
+        }
+
+        .status {
+            font-weight: 500;
+        }
+
+        .prediction {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+
+        .confidence {
+            font-size: 1.3rem;
+            color: #6c757d;
+        }
+
+        .btn {
+            min-height: 48px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            touch-action: manipulation;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .mobile-controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            padding: 15px;
+            border-top: 1px solid #dee2e6;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+        }
+        
+        .mobile-controls .container {
+            max-width: 100%;
+            padding: 0;
+        }
+        
+        /* Add padding to body on mobile to account for fixed controls */
+        @media (max-width: 767px) {
+            body {
+                padding-bottom: 120px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding-left: 10px;
+                padding-right: 10px;
+            }
+            
+            h1 {
+                font-size: 1.8rem;
+                margin-bottom: 20px;
+            }
+            
+            .btn {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+            
+            .prediction {
+                font-size: 1.8rem;
+            }
+            
+            .confidence {
+                font-size: 1.2rem;
+            }
+            
+            #video {
+                max-height: 60vh;
+            }
+            
+            .card-body {
+                padding: 15px;
+            }
+            
+            .live-prediction {
+                font-size: 1.2rem;
+                padding: 10px 16px;
+                min-width: 160px;
+            }
+            
+            .live-confidence {
+                font-size: 0.9rem;
+                padding: 5px 10px;
+            }
+        }
+
+        @media (max-width: 576px) {
+            h1 {
+                font-size: 1.6rem;
+            }
+            
+            .btn {
+                font-size: 1rem;
+                padding: 12px 20px;
+            }
+            
+            .prediction {
+                font-size: 1.6rem;
+            }
+        }
+
+        /* iOS Safari specific fixes */
+        @supports (-webkit-touch-callout: none) {
+            #video {
+                -webkit-playsinline: true;
+            }
+        }
+
+        .bar { 
+            height: 10px; 
+            border-radius: 999px; 
+            background:#dee2e6; 
+            overflow:hidden;
+            margin-bottom: 8px;
+        }
+        .bar > div { 
+            height:100%; 
+            width:0%; 
+            background: linear-gradient(45deg, #28a745, #20c997);
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-3">
+        <div class="row justify-content-center">
+            <div class="col-12 col-lg-8">
+                <h1 class="text-center mb-3">🌸🌺 Detector de Flores</h1>
+                
+                <div class="alert alert-info text-center" id="status" role="alert">
+                    Cargando modelo...
+                </div>
+                
+                <!-- Live prediction display above video -->
+                <div class="prediction-display" id="predictionDisplay" style="display: none;">
+                    <div class="live-prediction" id="livePrediction"></div>
+                    <div class="live-confidence" id="liveConfidence"></div>
+                </div>
+                
+                <div class="video-container">
+                    <video id="video" class="img-fluid" autoplay muted playsinline webkit-playsinline></video>
+                    <canvas id="canvas" width="224" height="224"></canvas>
+                </div>
+                
+                <div class="card mb-3" id="result" style="display: none;">
+                    <div class="card-body text-center">
+                        <div class="prediction" id="prediction"></div>
+                        <div class="confidence" id="confidence"></div>
+                    </div>
+                </div>
+                
+                <!-- Top 5 predictions card -->
+                <div class="card mb-3" id="top5Card" style="display: none;">
+                    <div class="card-header">
+                        <h6 class="mb-0">🏆 Top 5 Predicciones</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="top5Container"></div>
+                    </div>
+                </div>
+                
+                <!-- Mobile-optimized controls -->
+                <div class="mobile-controls d-md-none">
+                    <div class="container">
+                        <div class="row g-2">
+                            <div class="col-4">
+                                <button id="startBtn-mobile" class="btn btn-primary btn-sm w-100" onclick="startCamera()" disabled>
+                                    📷 Iniciar
+                                </button>
+                            </div>
+                            <div class="col-4">
+                                <button id="stopBtn-mobile" class="btn btn-secondary btn-sm w-100" onclick="stopCamera()" disabled>
+                                    ⏹️ Detener
+                                </button>
+                            </div>
+                            <div class="col-4">
+                                <button id="predictBtn-mobile" class="btn btn-success btn-sm w-100" onclick="togglePrediction()" disabled>
+                                    🔍 Detectar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Desktop controls -->
+                <div class="d-none d-md-flex justify-content-center gap-2 mb-4">
+                    <button id="startBtn" class="btn btn-primary" onclick="startCamera()" disabled>
+                        📷 Iniciar Cámara
+                    </button>
+                    <button id="stopBtn" class="btn btn-secondary" onclick="stopCamera()" disabled>
+                        ⏹️ Detener
+                    </button>
+                    <button id="predictBtn" class="btn btn-success" onclick="togglePrediction()" disabled>
+                        🔍 Iniciar Detección
+                    </button>
+                </div>
+                
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5 class="mb-0">📋 Instrucciones</h5>
+                    </div>
+                    <div class="card-body">
+                        <ol class="mb-3">
+                            <li>Toca "Iniciar Cámara" para activar la cámara</li>
+                            <li>Enfoca una flor con la cámara</li>
+                            <li>Toca "Iniciar Detección" para comenzar</li>
+                            <li>El modelo analizará automáticamente cada segundo</li>
+                        </ol>
+                        <div class="alert alert-success mb-0" role="alert">
+                            <strong>🌸 Tip:</strong> Funciona mejor con buena iluminación y flores bien enfocadas. Detecta 104 tipos diferentes de flores.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let model = null;
+        let video = null;
+        let canvas = null;
+        let ctx = null;
+        let isDetecting = false;
+        let detectionInterval = null;
+        let stream = null;
+
+        const NUM_CLASSES = 104;
+        const CLASS_NAMES = [
+          "pink primrose",
+          "hard-leaved pocket orchid",
+          "canterbury bells",
+          "sweet pea",
+          "wild rose",
+          "tiger lily",
+          "moon orchid",
+          "bird of paradise",
+          "monkshood",
+          "globe thistle",
+          "snapdragon",
+          "colt's foot",
+          "king protea",
+          "spear thistle",
+          "yellow iris",
+          "globe-flower",
+          "purple coneflower",
+          "peruvian lily",
+          "balloon flower",
+          "giant white arum lily",
+          "fire lily",
+          "pincushion flower",
+          "fritillary",
+          "red ginger",
+          "grape hyacinth",
+          "corn poppy",
+          "prince of wales feathers",
+          "stemless gentian",
+          "artichoke flower",
+          "sweet william",
+          "carnation",
+          "garden phlox",
+          "love in the mist",
+          "mexican petunia",
+          "bromelia",
+          "blanket flower",
+          "trumpet creeper",
+          "blackberry lily",
+          "beard flower",
+          "silverbush",
+          "californian poppy",
+          "osteospermum",
+          "rue",
+          "clematis",
+          "hibiscus",
+          "columbine",
+          "desert-rose",
+          "tree mallow",
+          "magnolia",
+          "cyclamen",
+          "water lily",
+          "rose",
+          "thorn apple",
+          "morning glory",
+          "passion flower",
+          "lotus",
+          "toad lily",
+          "anthurium",
+          "frangipani",
+          "clethra",
+          "marigold",
+          "buttercup",
+          "oxeye daisy",
+          "common dandelion",
+          "poinsettia",
+          "bolero deep blue",
+          "wallflower",
+          "maroon marigold",
+          "buttercup yellow",
+          "wallflower purple",
+          "primula",
+          "carnation pink",
+          "english daisy",
+          "bee balm",
+          "ball moss",
+          "garland chrysanthemum",
+          "barberton daisy",
+          "petunia",
+          "purple anemone",
+          "bougainvillea",
+          "camellia",
+          "california poppy",
+          "gloxinia",
+          "geranium",
+          "daisy",
+          "raisin",
+          "azalea",
+          "mexican aster",
+          "daffodil",
+          "dandelion",
+          "calla lily",
+          "bromelia red",
+          "mallow",
+          "buttercup field",
+          "passionfruit flower",
+          "foxglove",
+          "bellflower",
+          "lilac hibiscus",
+          "sunflower",
+          "garden petunia",
+          "tree dahlia",
+          "wild pansy",
+          "pincushion protea",
+          "bishop's flower",
+          "gaura",
+          "godetia",
+          "alpine sea holly",
+          "love lies bleeding"
+        ];
+
+        // Elementos del DOM
+        const statusEl = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const predictBtn = document.getElementById('predictBtn');
+        const startBtnMobile = document.getElementById('startBtn-mobile');
+        const stopBtnMobile = document.getElementById('stopBtn-mobile');
+        const predictBtnMobile = document.getElementById('predictBtn-mobile');
+        const resultEl = document.getElementById('result');
+        const predictionEl = document.getElementById('prediction');
+        const confidenceEl = document.getElementById('confidence');
+        const predictionDisplay = document.getElementById('predictionDisplay');
+        const livePrediction = document.getElementById('livePrediction');
+        const liveConfidence = document.getElementById('liveConfidence');
+        const top5Card = document.getElementById('top5Card');
+        const top5Container = document.getElementById('top5Container');
+
+        // Cargar el modelo
+        async function loadModel() {
+            try {
+                statusEl.textContent = 'Cargando modelo de flores...';
+                statusEl.className = 'alert alert-info text-center';
+                
+                model = await tf.loadLayersModel('./web_model_flowers/model.json');
+                
+                statusEl.textContent = '✅ Modelo cargado correctamente';
+                statusEl.className = 'alert alert-success text-center';
+                if (startBtn) startBtn.disabled = false;
+                if (startBtnMobile) startBtnMobile.disabled = false;
+                
+                console.log('Modelo de flores cargado exitosamente');
+                console.log('Forma de entrada esperada:', model.inputs[0].shape);
+            } catch (error) {
+                console.error('Error cargando el modelo:', error);
+                statusEl.textContent = '❌ Error cargando el modelo: ' + error.message;
+                statusEl.className = 'alert alert-danger text-center';
+            }
+        }
+
+        // Inicializar elementos de video y canvas
+        function initializeElements() {
+            video = document.getElementById('video');
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+        }
+
+        // Iniciar la cámara
+        async function startCamera() {
+            try {
+                statusEl.textContent = 'Iniciando cámara...';
+                statusEl.className = 'alert alert-warning text-center';
+                
+                // Configuración mejorada para móviles
+                const constraints = {
+                    video: { 
+                        width: { min: 320, ideal: 640, max: 1280 }, 
+                        height: { min: 240, ideal: 480, max: 720 },
+                        facingMode: 'environment', // Cámara trasera por defecto en móviles
+                        aspectRatio: 4/3
+                    }
+                };
+                
+                // En dispositivos móviles, intentar primero cámara trasera
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (error) {
+                    // Si falla, usar cámara frontal
+                    constraints.video.facingMode = 'user';
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                }
+                
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    statusEl.textContent = '📹 Cámara activa - Lista para detectar flores';
+                    statusEl.className = 'alert alert-success text-center';
+                    // Actualizar botones de escritorio
+                    if (startBtn) {
+                        startBtn.disabled = true;
+                        stopBtn.disabled = false;
+                        predictBtn.disabled = false;
+                    }
+                    // Actualizar botones móviles
+                    if (startBtnMobile) {
+                        startBtnMobile.disabled = true;
+                        stopBtnMobile.disabled = false;
+                        predictBtnMobile.disabled = false;
+                    }
+                };
+                
+            } catch (error) {
+                console.error('Error accediendo a la cámara:', error);
+                statusEl.textContent = '❌ Error: No se pudo acceder a la cámara';
+                statusEl.className = 'alert alert-danger text-center';
+            }
+        }
+
+        // Detener la cámara
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                stream = null;
+            }
+            
+            stopDetection();
+            
+            statusEl.textContent = '⏹️ Cámara detenida';
+            statusEl.className = 'alert alert-info text-center';
+            
+            // Actualizar botones de escritorio
+            if (startBtn) {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                predictBtn.disabled = true;
+            }
+            // Actualizar botones móviles
+            if (startBtnMobile) {
+                startBtnMobile.disabled = false;
+                stopBtnMobile.disabled = true;
+                predictBtnMobile.disabled = true;
+            }
+            
+            resultEl.style.display = 'none';
+            top5Card.style.display = 'none';
+        }
+
+        // Activar/desactivar detección automática
+        function togglePrediction() {
+            if (isDetecting) {
+                stopDetection();
+            } else {
+                startDetection();
+            }
+        }
+
+        // Iniciar detección automática
+        function startDetection() {
+            isDetecting = true;
+            // Actualizar texto de botones
+            if (predictBtn) predictBtn.textContent = '⏸️ Pausar Detección';
+            if (predictBtnMobile) predictBtnMobile.textContent = '⏸️ Pausar';
+            
+            resultEl.style.display = 'block';
+            predictionDisplay.style.display = 'block';
+            top5Card.style.display = 'block';
+            
+            // Realizar predicción cada segundo
+            detectionInterval = setInterval(predictImage, 1000);
+            
+            // Realizar la primera predicción inmediatamente
+            predictImage();
+        }
+
+        // Detener detección automática
+        function stopDetection() {
+            isDetecting = false;
+            // Actualizar texto de botones
+            if (predictBtn) predictBtn.textContent = '🔍 Iniciar Detección';
+            if (predictBtnMobile) predictBtnMobile.textContent = '🔍 Detectar';
+            
+            predictionDisplay.style.display = 'none';
+            
+            if (detectionInterval) {
+                clearInterval(detectionInterval);
+                detectionInterval = null;
+            }
+        }
+
+        // Preprocesar imagen para el modelo
+        function preprocessImage() {
+            // Dibujar el video actual en el canvas
+            ctx.drawImage(video, 0, 0, 224, 224);
+            
+            // Obtener los datos de imagen del canvas
+            const imageData = ctx.getImageData(0, 0, 224, 224);
+            const data = imageData.data;
+            
+            // Convertir a tensor normalizado para el modelo de flores
+            const tensorData = new Float32Array(224 * 224 * 3);
+            
+            for (let i = 0; i < data.length; i += 4) {
+                const pixelIndex = i / 4;
+                tensorData[pixelIndex * 3] = data[i] / 255.0;         // R
+                tensorData[pixelIndex * 3 + 1] = data[i + 1] / 255.0; // G
+                tensorData[pixelIndex * 3 + 2] = data[i + 2] / 255.0; // B
+            }
+            
+            return tf.tensor4d(tensorData, [1, 224, 224, 3]);
+        }
+
+        // Realizar predicción
+        async function predictImage() {
+            if (!model || !video.videoWidth) {
+                return;
+            }
+            
+            try {
+                // Preprocesar la imagen
+                const inputTensor = preprocessImage();
+                
+                // Realizar predicción
+                const prediction = await model.predict(inputTensor);
+                const predictionData = await prediction.data();
+                
+                // Limpiar tensores para liberar memoria
+                inputTensor.dispose();
+                prediction.dispose();
+                
+                // Encontrar la clase con mayor probabilidad
+                let maxIndex = 0;
+                for (let i = 1; i < predictionData.length; i++) {
+                    if (predictionData[i] > predictionData[maxIndex]) {
+                        maxIndex = i;
+                    }
+                }
+                
+                const confidence = predictionData[maxIndex];
+                const flowerName = CLASS_NAMES[maxIndex];
+                
+                // Mostrar resultado en la tarjeta
+                predictionEl.textContent = `🌸 ${flowerName}`;
+                predictionEl.className = 'prediction text-success';
+                confidenceEl.textContent = `Confianza: ${(confidence * 100).toFixed(1)}%`;
+                
+                // Mostrar resultado en vivo arriba del video
+                livePrediction.textContent = `🌸 ${flowerName}`;
+                livePrediction.className = 'live-prediction flower-prediction show';
+                liveConfidence.textContent = `${(confidence * 100).toFixed(1)}% confianza`;
+                
+                // Mostrar top 5 predicciones
+                updateTop5Predictions(predictionData);
+                
+            } catch (error) {
+                console.error('Error en predicción:', error);
+                predictionEl.textContent = '❌ Error en la detección';
+                predictionEl.className = 'prediction text-danger';
+                confidenceEl.textContent = '';
+                
+                // Mostrar error en display en vivo
+                livePrediction.textContent = '❌ Error';
+                livePrediction.className = 'live-prediction show';
+                liveConfidence.textContent = 'Reintentando...';
+            }
+        }
+
+        // Actualizar top 5 predicciones
+        function updateTop5Predictions(predictionData) {
+            // Crear array de índices ordenado por probabilidad
+            const indices = Array.from({length: predictionData.length}, (_, i) => i);
+            indices.sort((a, b) => predictionData[b] - predictionData[a]);
+            
+            // Mostrar top 5
+            const top5 = indices.slice(0, 5);
+            top5Container.innerHTML = '';
+            
+            top5.forEach((index, rank) => {
+                const div = document.createElement('div');
+                div.className = 'mb-2';
+                div.innerHTML = `
+                    <div class="d-flex justify-content-between">
+                        <span><strong>${rank + 1}.</strong> ${CLASS_NAMES[index]}</span>
+                        <span>${(predictionData[index] * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="bar">
+                        <div style="width: ${predictionData[index] * 100}%"></div>
+                    </div>
+                `;
+                top5Container.appendChild(div);
+            });
+        }
+
+        // Inicializar la aplicación
+        window.addEventListener('load', () => {
+            initializeElements();
+            loadModel();
+        });
+
+        // Limpiar recursos al cerrar la página
+        window.addEventListener('beforeunload', () => {
+            stopCamera();
+            if (model) {
+                model.dispose();
+            }
+        });
+    </script>
+</body>
+</html>

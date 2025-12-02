@@ -1,0 +1,9 @@
+tensorflow==2.13.0
+tensorflowjs==4.5.0
+tensorflow-datasets
+kaggle
+numpy
+matplotlib
+scikit-learn
+pillow
+tqdm
